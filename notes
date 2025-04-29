@@ -1,0 +1,2 @@
+Build Raylib:
+    cmake .. -DBUILD_SHARED_LIBS=OFF
