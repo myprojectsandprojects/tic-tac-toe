@@ -1,0 +1,1 @@
+After cloning (with submodules), run ./build-raylib.sh before running zig build.
