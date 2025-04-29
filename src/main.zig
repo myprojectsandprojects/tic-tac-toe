@@ -1,7 +1,7 @@
 const ray = @cImport(@cInclude("raylib.h"));
 
 pub fn main() !void {
-    ray.InitWindow(800, 600, "Raylib + Zig Portable");
+    ray.InitWindow(800, 600, "xxx");
     defer ray.CloseWindow();
 
     ray.SetTargetFPS(60);
