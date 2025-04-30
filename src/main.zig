@@ -58,11 +58,9 @@ pub fn main() !void {
                 if (wasDown == false) {
                     const x = ray.GetMouseX();
                     const y = ray.GetMouseY();
-                    print("mouse went down at ({}, {})\n", .{x, y});
                     if (x >= boardX and x < boardX + boardWidth and y >= boardY and y < boardY + boardWidth) {
                         const bx = @divFloor((x - boardX), cellWidth);
                         const by = @divFloor((y - boardY), cellHeight);
-                        print("board: x: {}, y: {}\n", .{bx, by});
                         assert(bx >= 0 and by >= 0);
                         const index: usize = @intCast(by * columnsInRow + bx);
                         if (board[index] == 0) {
@@ -79,9 +77,9 @@ pub fn main() !void {
                             } else if (numMovesMade == 9) {
                                 gameOver = true;
                                 print("DRAW\n", .{});
+                            } else {
+                                turn = if (turn == 1) -1 else 1;
                             }
-
-                            turn = if (turn == 1) -1 else 1;
                         } else {
                             print("Can't place a stone there!\n", .{});
                         }
