@@ -19,7 +19,11 @@ const Stone = enum {
     BLACK,
     WHITE,
 };
-const stoneToString = [2][]const u8{"BLACK", "WHITE"};
+
+fn stoneToString(stone: Stone) []const u8 {
+    const stoneNames = [2][]const u8{"BLACK", "WHITE"};
+    return stoneNames[@intFromEnum(stone)];
+}
 
 pub fn main() !void {
     const windowWidth = 800;
@@ -44,14 +48,16 @@ pub fn main() !void {
     //var board: [3][3]?Stone; //?
     var board: [9]?Stone = [1]?Stone{null} ** 9;
     var numEmptyCells: u8 = board.len; 
+
+    var turn: Stone = .BLACK;
+
     var gameOver: bool = false;
-    var gameOverString: ?[]const u8 = null;
+    const allocator = std.heap.page_allocator;
+    var gameMessage: []const u8 = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
 
     const LEFT_MOUSE = 0;
     //const RIGHT_BUTTON = 1;
     var wasDown: bool = ray.IsMouseButtonDown(LEFT_MOUSE);
-
-    var turn: Stone = .BLACK;
 
     while (!ray.WindowShouldClose()) {
         const isDown = ray.IsMouseButtonDown(LEFT_MOUSE);
@@ -67,6 +73,7 @@ pub fn main() !void {
                     const by = @as(u8, @intFromFloat(@floor((@as(f32, @floatFromInt(y)) - boardY) / cellHeight)));
 
                     assert(bx >= 0 and by >= 0);
+                    assert(bx < numColumns and by < numRows);
                     const index: usize = @intCast(by * numColumns + bx);
 
                     if (board[index] == null) {
@@ -91,22 +98,28 @@ pub fn main() !void {
                         if (isWin(board[0..], @intCast(bx), @intCast(by), numColumns)) {
                             gameOver = true;
 
-                            const allocator = std.heap.page_allocator;
-                            gameOverString = try std.fmt.allocPrint(allocator, "{s} wins!", .{stoneToString[@intFromEnum(turn)]});
+                            allocator.free(gameMessage);
+                            gameMessage = try std.fmt.allocPrint(allocator, "{s} wins!", .{stoneToString(turn)});
 
-                            print("WIN {s}\n", .{stoneToString[@intFromEnum(turn)]});
                             //for (&board) |*cell| {
                             //    cell.* = 0;
                             //}
                         } else if (numEmptyCells == 0) {
                             gameOver = true;
-                            print("DRAW\n", .{});
+
+                            allocator.free(gameMessage);
+                            gameMessage = try std.fmt.allocPrint(allocator, "A draw.", .{});
                         } else {
                             turn = if (turn == .BLACK) .WHITE else .BLACK;
+
+                            allocator.free(gameMessage);
+                            gameMessage = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
                         }
                     } else {
                         print("Can't place a stone there!\n", .{});
                     }
+                } else {
+                    print("Mouse not on board.\n", .{});
                 }
             }
         }
@@ -159,13 +172,19 @@ pub fn main() !void {
             ray.DrawCircle(stoneX, stoneY, stoneRadius, stoneColor);
         }
 
-        if (gameOver) {
-            if (gameOverString) |string| {
-                ray.DrawText(string.ptr, 10, 10, 24, ray.BLACK);
-            } else {
-                ray.DrawText("Draw!", 10, 10, 24, ray.BLACK);
-            }
-        }
+        //if (gameOver) {
+        //    if (gameOverString) |string| {
+        //        ray.DrawText(string.ptr, 10, 10, 24, ray.BLACK);
+        //    } else {
+        //        ray.DrawText("Draw!", 10, 10, 24, ray.BLACK);
+        //    }
+        //} else {
+        //    const gameOnString = try std.fmt.allocPrint(allocator, "{s}'s turn...", .{stoneToString(turn)});
+        //    defer allocator.free(gameOnString);
+        //    ray.DrawText(gameOnString.ptr, 10, 10, 24, ray.BLACK);
+        //}
+
+        ray.DrawText(gameMessage.ptr, 10, 10, 24, ray.BLACK);
 
         ray.EndDrawing();
     }
