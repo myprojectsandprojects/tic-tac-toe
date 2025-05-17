@@ -20,25 +20,40 @@ const Stone = enum {
     WHITE,
 };
 
+const GameResult = enum {
+    WIN_LOSS,
+    DRAW
+};
+
+const Player = struct {
+    stones: Stone,
+    //name: []const u8,
+};
+
 fn stoneToString(stone: Stone) []const u8 {
     const stoneNames = [2][]const u8{"BLACK", "WHITE"};
     return stoneNames[@intFromEnum(stone)];
 }
 
 pub fn main() !void {
-    const windowWidth = 800;
-    const windowHeight = 600;
+    const windowWidth = 801;
+    const windowHeight = 601;
     ray.InitWindow(windowWidth, windowHeight, "Tic Tac Toe");
     defer ray.CloseWindow();
 
     //ray.SetTargetFPS(1);
     ray.SetTargetFPS(60);
 
+    const players = [2]Player{.{.stones = Stone.BLACK}, .{.stones = Stone.WHITE}};
+    var gameResult: ?GameResult = null;
+    var winner: ?Player = null;
+
     const boardColor = ray.DARKBROWN;
-    const boardX: f32 = 100;
-    const boardY: f32 = 100;
     const boardWidth: f32 = 300;
     const boardHeight: f32 = 300;
+    const boardX: f32 = @as(f32, @floatFromInt(windowWidth)) / 2 - boardWidth / 2;
+    const boardY: f32 = @as(f32, @floatFromInt(windowHeight)) / 2 - boardHeight / 2;
+    print("boardX: {d}\n", .{boardX});
 
     const numColumns = 3;
     const numRows = 3;
@@ -52,8 +67,8 @@ pub fn main() !void {
     var turn: Stone = .BLACK;
 
     var gameOver: bool = false;
-    const allocator = std.heap.page_allocator;
-    var gameMessage: []const u8 = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
+    //const allocator = std.heap.page_allocator;
+    //var gameMessage: []const u8 = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
 
     const LEFT_MOUSE = 0;
     //const RIGHT_BUTTON = 1;
@@ -68,7 +83,7 @@ pub fn main() !void {
             if (mouseWentDown) {
                 const x = ray.GetMouseX();
                 const y = ray.GetMouseY();
-                if (x >= boardX and x < boardX + boardWidth and y >= boardY and y < boardY + boardWidth) {
+                if (x >= @round(boardX) and x < @round(boardX + boardWidth) and y >= @round(boardY) and y < @round(boardY + boardHeight)) {
                     const bx = @as(u8, @intFromFloat(@floor((@as(f32, @floatFromInt(x)) - boardX) / cellWidth)));
                     const by = @as(u8, @intFromFloat(@floor((@as(f32, @floatFromInt(y)) - boardY) / cellHeight)));
 
@@ -97,23 +112,30 @@ pub fn main() !void {
 
                         if (isWin(board[0..], @intCast(bx), @intCast(by), numColumns)) {
                             gameOver = true;
+                            gameResult = GameResult.WIN_LOSS;
+                            winner = players[@intFromEnum(turn)];
 
-                            allocator.free(gameMessage);
-                            gameMessage = try std.fmt.allocPrint(allocator, "{s} wins!", .{stoneToString(turn)});
+                            print("{s} wins\n", .{stoneToString(turn)});
+
+                            //allocator.free(gameMessage);
+                            //gameMessage = try std.fmt.allocPrint(allocator, "{s} wins!", .{stoneToString(turn)});
 
                             //for (&board) |*cell| {
                             //    cell.* = 0;
                             //}
                         } else if (numEmptyCells == 0) {
                             gameOver = true;
+                            gameResult = GameResult.DRAW;
 
-                            allocator.free(gameMessage);
-                            gameMessage = try std.fmt.allocPrint(allocator, "A draw.", .{});
+                            print("draw\n", .{});
+
+                            //allocator.free(gameMessage);
+                            //gameMessage = try std.fmt.allocPrint(allocator, "A draw.", .{});
                         } else {
                             turn = if (turn == .BLACK) .WHITE else .BLACK;
 
-                            allocator.free(gameMessage);
-                            gameMessage = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
+                            //allocator.free(gameMessage);
+                            //gameMessage = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
                         }
                     } else {
                         print("Can't place a stone there!\n", .{});
@@ -139,20 +161,20 @@ pub fn main() !void {
         ray.ClearBackground(ray.BEIGE);
 
         // Draw board
-        ray.DrawRectangle(boardX, boardY, boardWidth, boardHeight, boardColor);
+        ray.DrawRectangle(@round(boardX), @round(boardY), @round(boardWidth), @round(boardHeight), boardColor);
 
         // Draw vertical lines
         const shortenBy = 10;
-        const startY = boardY + shortenBy;
-        const endY = boardY + boardHeight - shortenBy;
+        const startY = @round(boardY + shortenBy);
+        const endY = @round(boardY + boardHeight - shortenBy);
         for (1..numColumns) |i| {
             const x: i32 = @as(i32, @intFromFloat(boardX)) + @as(i32, @intCast(i)) * @as(i32, @intFromFloat(cellWidth));
             ray.DrawLine(x, startY, x, endY, ray.BLACK);
         }
 
         // Draw horizontal lines
-        const startX = boardX;
-        const endX = boardX + boardWidth;
+        const startX = @round(boardX);
+        const endX = @round(boardX + boardWidth);
         for (1..numRows) |i| {
             const y: i32 = @as(i32, @intFromFloat(boardY)) + @as(i32, @intCast(i)) * @as(i32, @intFromFloat(cellHeight));
             ray.DrawLine(startX, y, endX, y, ray.BLACK);
@@ -172,19 +194,49 @@ pub fn main() !void {
             ray.DrawCircle(stoneX, stoneY, stoneRadius, stoneColor);
         }
 
-        //if (gameOver) {
-        //    if (gameOverString) |string| {
-        //        ray.DrawText(string.ptr, 10, 10, 24, ray.BLACK);
-        //    } else {
-        //        ray.DrawText("Draw!", 10, 10, 24, ray.BLACK);
-        //    }
-        //} else {
-        //    const gameOnString = try std.fmt.allocPrint(allocator, "{s}'s turn...", .{stoneToString(turn)});
-        //    defer allocator.free(gameOnString);
-        //    ray.DrawText(gameOnString.ptr, 10, 10, 24, ray.BLACK);
-        //}
+        //ray.DrawText(gameMessage.ptr, 10, 10, 24, ray.BLACK);
 
-        ray.DrawText(gameMessage.ptr, 10, 10, 24, ray.BLACK);
+        const x = 24;
+        const y = 24;
+        const r = 16;
+
+        const stonesY = y + r;
+        const stonesX = [2]i32{
+            x + r, // black
+            x + r + 2 * r // white
+        };
+        const colors = [2]ray.Color{
+            ray.BLACK, // black
+            ray.WHITE // white
+        };
+        const invert = [2]usize{1, 0}; //@
+        const n = @intFromEnum(turn);
+
+        if (gameResult) |result| {
+            if (result == GameResult.WIN_LOSS) {
+                print("{s} WON\n", .{stoneToString(winner.?.stones)});
+
+                // draw smaller first
+                ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
+                // then draw bigger
+                ray.DrawCircle(stonesX[n], stonesY, 24, colors[n]);
+            } else {
+                assert(result == GameResult.DRAW);
+                print("Game over -- DRAW\n", .{});
+
+                // draw smaller first
+                ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
+                // then draw bigger
+                ray.DrawCircle(stonesX[n], stonesY, 16, colors[n]);
+            }
+        } else {
+            print("Game on\n", .{});
+
+            // draw smaller first
+            ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
+            // then draw bigger
+            ray.DrawCircle(stonesX[n], stonesY, 24, colors[n]);
+        }
 
         ray.EndDrawing();
     }
