@@ -25,9 +25,16 @@ const GameResult = enum {
     DRAW
 };
 
+//const Game = struct {
+//    players: [2]Player,
+//    wasDraw: bool,
+//    winner: ?*Player // null if draw
+//};
+
 const Player = struct {
+    name: []const u8,
     stones: Stone,
-    //name: []const u8,
+    isComputer: bool,
 };
 
 fn stoneToString(stone: Stone) []const u8 {
@@ -44,9 +51,12 @@ pub fn main() !void {
     //ray.SetTargetFPS(1);
     ray.SetTargetFPS(60);
 
-    const players = [2]Player{.{.stones = Stone.BLACK}, .{.stones = Stone.WHITE}};
+    const players = [2]Player{
+        .{.name="Joey", .stones=Stone.BLACK, .isComputer=false},
+        .{.name="WHITE", .stones=Stone.WHITE, .isComputer=false}
+    };
     var gameResult: ?GameResult = null;
-    var winner: ?Player = null;
+    var winner: ?*const Player = null;
 
     const boardColor = ray.DARKBROWN;
     const boardWidth: f32 = 300;
@@ -64,7 +74,7 @@ pub fn main() !void {
     var board: [9]?Stone = [1]?Stone{null} ** 9;
     var numEmptyCells: u8 = board.len; 
 
-    var turn: Stone = .BLACK;
+    var turn: *const Player = &players[0];
 
     var gameOver: bool = false;
     //const allocator = std.heap.page_allocator;
@@ -73,6 +83,10 @@ pub fn main() !void {
     const LEFT_MOUSE = 0;
     //const RIGHT_BUTTON = 1;
     var wasDown: bool = ray.IsMouseButtonDown(LEFT_MOUSE);
+
+    var angle: f32 = 0;
+    //var angle: f32 = std.math.pi / 2.0;
+    var playAnimation = false;
 
     while (!ray.WindowShouldClose()) {
         const isDown = ray.IsMouseButtonDown(LEFT_MOUSE);
@@ -93,8 +107,10 @@ pub fn main() !void {
 
                     if (board[index] == null) {
                         // Make a move
-                        board[index] = turn;
+                        board[index] = turn.stones;
                         numEmptyCells -= 1;
+
+                        playAnimation = true;
 
                         //const isGameOver = getGameResult(board[0..], ...);
                         //if (isGameOver.yap) {
@@ -113,9 +129,9 @@ pub fn main() !void {
                         if (isWin(board[0..], @intCast(bx), @intCast(by), numColumns)) {
                             gameOver = true;
                             gameResult = GameResult.WIN_LOSS;
-                            winner = players[@intFromEnum(turn)];
+                            winner = turn;
 
-                            print("{s} wins\n", .{stoneToString(turn)});
+                            print("{s} wins\n", .{winner.?.name});
 
                             //allocator.free(gameMessage);
                             //gameMessage = try std.fmt.allocPrint(allocator, "{s} wins!", .{stoneToString(turn)});
@@ -132,7 +148,7 @@ pub fn main() !void {
                             //allocator.free(gameMessage);
                             //gameMessage = try std.fmt.allocPrint(allocator, "A draw.", .{});
                         } else {
-                            turn = if (turn == .BLACK) .WHITE else .BLACK;
+                            turn = if (turn == &players[0]) &players[1] else &players[0];
 
                             //allocator.free(gameMessage);
                             //gameMessage = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
@@ -196,47 +212,87 @@ pub fn main() !void {
 
         //ray.DrawText(gameMessage.ptr, 10, 10, 24, ray.BLACK);
 
-        const x = 24;
-        const y = 24;
-        const r = 16;
+        //const stonesY = y + r;
+        //const stonesX = [2]i32{
+        //    x + r, // player 1
+        //    x + r + 2 * r // player 2
+        //};
+        //const colors = [2]ray.Color{
+        //    ray.BLACK, // black
+        //    ray.WHITE // white
+        //};
+        //const invert = [2]usize{1, 0}; //@
+        //const n = @intFromEnum(turn);
 
-        const stonesY = y + r;
-        const stonesX = [2]i32{
-            x + r, // black
-            x + r + 2 * r // white
+        //if (gameResult) |result| {
+        //    if (result == GameResult.WIN_LOSS) {
+        //        print("{s} WON\n", .{stoneToString(winner.?.stones)});
+
+        //        // draw smaller first
+        //        ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
+        //        // then draw bigger
+        //        ray.DrawCircle(stonesX[n], stonesY, 24, colors[n]);
+        //    } else {
+        //        assert(result == GameResult.DRAW);
+        //        print("Game over -- DRAW\n", .{});
+
+        //        // draw smaller first
+        //        ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
+        //        // then draw bigger
+        //        ray.DrawCircle(stonesX[n], stonesY, 16, colors[n]);
+        //    }
+        //} else {
+        //    print("Game on\n", .{});
+
+        //    // draw smaller first
+        //    ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
+        //    // then draw bigger
+        //    ray.DrawCircle(stonesX[n], stonesY, 24, colors[n]);
+        //}
+
+        const colors = [_]ray.Color{
+            ray.BLACK,
+            ray.WHITE,
         };
-        const colors = [2]ray.Color{
-            ray.BLACK, // black
-            ray.WHITE // white
-        };
-        const invert = [2]usize{1, 0}; //@
-        const n = @intFromEnum(turn);
+        var turnStoneColor = colors[@intFromEnum(turn.stones)];
 
-        if (gameResult) |result| {
-            if (result == GameResult.WIN_LOSS) {
-                print("{s} WON\n", .{stoneToString(winner.?.stones)});
+        const x: f32 = 24.1;
+        const y: f32 = 24;
+        const maxWidth = 64;
+        const maxHeight = 64;
 
-                // draw smaller first
-                ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
-                // then draw bigger
-                ray.DrawCircle(stonesX[n], stonesY, 24, colors[n]);
-            } else {
-                assert(result == GameResult.DRAW);
-                print("Game over -- DRAW\n", .{});
-
-                // draw smaller first
-                ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
-                // then draw bigger
-                ray.DrawCircle(stonesX[n], stonesY, 16, colors[n]);
+        var width: f32 = maxWidth;
+        const height: f32 = maxHeight;
+        if (playAnimation) {
+            print("animation (angle = {d})\n", .{angle});
+            width = maxWidth * @abs(std.math.cos(angle));
+            if (angle < std.math.pi / 2.0) {
+                turnStoneColor = if(@intFromEnum(turn.stones) == 0) colors[1] else colors[0];
             }
-        } else {
-            print("Game on\n", .{});
-
-            // draw smaller first
-            ray.DrawCircle(stonesX[invert[n]], stonesY, 16, colors[invert[n]]);
-            // then draw bigger
-            ray.DrawCircle(stonesX[n], stonesY, 24, colors[n]);
+            //angle += std.math.pi / 128.0;
+            angle += std.math.pi / 32.0;
+            //angle += std.math.pi / 16.0;
+            if (angle >= std.math.pi) {
+                playAnimation = false;
+                angle = 0;
+            }
         }
+
+        ray.DrawRectangle(@intFromFloat(@round(x + ((maxWidth - width) / 2))), @round(y), @intFromFloat(@round(width)), maxHeight, ray.BROWN);
+
+        const radiusH = width / 2;
+        const radiusV = height / 2;
+        const centerX: i32 = @intFromFloat(@round(x + maxWidth / 2));
+        const centerY: i32 = @intFromFloat(@round(y + maxHeight / 2));
+        ray.DrawEllipse(centerX, centerY, radiusH * 0.7, radiusV * 0.7, turnStoneColor);
+        //ray.DrawEllipse(centerX, centerY, radiusH * 0.5, radiusV * 0.5, turnStoneColor);
+
+        const lineThick = 6;
+        const rectWidth = if(width < lineThick) lineThick else width;
+        const rectangle = ray.Rectangle{.x = x + (maxWidth - rectWidth) / 2, .y = y, .width = rectWidth, .height = height};
+        //const rectangle = ray.Rectangle{.x = x - lineThick, .y = y - lineThick, .width = width + 2 * lineThick, .height = height + 2 * lineThick};
+        ray.DrawRectangleLinesEx(rectangle, lineThick, ray.RED);
+        //ray.DrawRectangleLinesEx(rectangle, lineThick, ray.DARKBROWN);
 
         ray.EndDrawing();
     }
@@ -282,133 +338,6 @@ fn isWin(board: []?Stone, lastMoveX: i8, lastMoveY: i8, columnsInRow: u8) bool {
         }
     }
     return false;
-
-    //stoneCount = 1;
-    //{
-    //    var dx: i8 = 1;
-    //    while (true) : (dx += 1) {
-    //        const x = lastMoveX + dx;
-    //        const y = lastMoveY;
-
-    //        if (x > 2) break;
-    //        if (board[getIndex(x, y, columnsInRow)] != lastMoveStone) break;
-
-    //        stoneCount += 1;
-    //    }
-    //}
-    //{
-    //    var dx: i8 = -1;
-    //    while (true) : (dx -= 1) {
-    //        const x: isize = lastMoveX + dx;
-    //        const y: isize = lastMoveY;
-
-    //        if (x < 0) break;
-    //        if (board[@intCast(y * columnsInRow + x)] != lastMoveStone) break;
-
-    //        stoneCount += 1;
-    //    }
-    //}
-
-    //assert(stoneCount <= 3);
-    //if (stoneCount == 3) {
-    //    return true;
-    //}
-
-    //stoneCount = 1;
-    //{
-    //    var dy: i8 = 1;
-    //    while (true) : (dy += 1) {
-    //        const x: isize = lastMoveX;
-    //        const y: isize = lastMoveY + dy;
-
-    //        if (y > 2) break;
-    //        if (board[@intCast(y * columnsInRow + x)] != lastMoveStone) break;
-
-    //        stoneCount += 1;
-    //    }
-    //}
-    //{
-    //    var dy: i8 = -1;
-    //    while (true) : (dy -= 1) {
-    //        const x: isize = lastMoveX;
-    //        const y: isize = lastMoveY + dy;
-
-    //        if (y < 0) break;
-    //        if (board[@intCast(y * columnsInRow + x)] != lastMoveStone) break;
-
-    //        stoneCount += 1;
-    //    }
-    //}
-
-    //if (stoneCount == 3) {
-    //    return true;
-    //}
-
-    //stoneCount = 1;
-    //{
-    //    var dx: i8 = 1;
-    //    var dy: i8 = 1;
-    //    while (true) : ({dx += 1; dy += 1;}) {
-    //        const x: isize = lastMoveX + dx;
-    //        const y: isize = lastMoveY + dy;
-
-    //        if (x > 2 or y > 2) break;
-    //        if (board[@intCast(y * columnsInRow + x)] != lastMoveStone) break;
-
-    //        stoneCount += 1;
-    //    }
-    //}
-    //{
-    //    var dx: i8 = -1;
-    //    var dy: i8 = -1;
-    //    while (true) : ({dx -= 1; dy -= 1;}) {
-    //        const x: isize = lastMoveX + dx;
-    //        const y: isize = lastMoveY + dy;
-
-    //        if (x < 0 or y < 0) break;
-    //        if (board[@intCast(y * columnsInRow + x)] != lastMoveStone) break;
-
-    //        stoneCount += 1;
-    //    }
-    //}
-
-    //if (stoneCount == 3) {
-    //    return true;
-    //}
-
-    //stoneCount = 1;
-    //{
-    //    var dx: i8 = 1;
-    //    var dy: i8 = -1;
-    //    while (true) : ({dx += 1; dy -= 1;}) {
-    //        const x: isize = lastMoveX + dx;
-    //        const y: isize = lastMoveY + dy;
-
-    //        if (x > 2 or y < 0) break;
-    //        if (board[@intCast(y * columnsInRow + x)] != lastMoveStone) break;
-
-    //        stoneCount += 1;
-    //    }
-    //}
-    //{
-    //    var dx: i8 = -1;
-    //    var dy: i8 = 1;
-    //    while (true) : ({dx -= 1; dy += 1;}) {
-    //        const x: isize = lastMoveX + dx;
-    //        const y: isize = lastMoveY + dy;
-
-    //        if (x < 0 or y > 2) break;
-    //        if (board[@intCast(y * columnsInRow + x)] != lastMoveStone) break;
-
-    //        stoneCount += 1;
-    //    }
-    //}
-
-    //if (stoneCount == 3) {
-    //    return true;
-    //}
-
-    //return false;
 }
 
 fn getIndex(x: i8, y: i8, columnsInRow: u8) usize {
