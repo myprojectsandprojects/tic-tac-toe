@@ -21,7 +21,7 @@ const Stone = enum {
 };
 
 const GameResult = enum {
-    WIN_LOSS,
+    WIN,
     DRAW
 };
 
@@ -37,9 +37,35 @@ const Player = struct {
     isComputer: bool,
 };
 
+const GameState = struct {
+    players: [2]Player,
+    playerToMove: *const Player,
+    board: [9]?Stone,
+    numEmptyCells: u8,
+    gameResult: ?GameResult, // 'null' if game is on
+    winner: ?*const Player,
+
+    //@ board size should depend on these:
+    numColumns: u8,
+    numRows: u8,
+};
+
 fn stoneToString(stone: Stone) []const u8 {
     const stoneNames = [2][]const u8{"BLACK", "WHITE"};
     return stoneNames[@intFromEnum(stone)];
+}
+
+fn getRandomNumber(max: usize) usize {
+    // Seed with current time or other entropy
+    var prng = std.Random.Xoshiro256.init(@intCast(std.time.milliTimestamp()));
+
+    // Get the Random interface
+    const rand = prng.random();
+
+    // Generate a random u8 between 0 and 255
+    const r = rand.int(usize);
+
+    return r % max+1;
 }
 
 pub fn main() !void {
@@ -51,12 +77,22 @@ pub fn main() !void {
     //ray.SetTargetFPS(1);
     ray.SetTargetFPS(60);
 
-    const players = [2]Player{
-        .{.name="Joey", .stones=Stone.BLACK, .isComputer=false},
-        .{.name="WHITE", .stones=Stone.WHITE, .isComputer=false}
+    const player1 = Player {.name="Black", .stones=Stone.BLACK, .isComputer=false};
+    const player2 = Player {.name="White", .stones=Stone.WHITE, .isComputer=true};
+
+    var gameState: GameState = GameState {
+        .players = [2]Player {player1, player2},
+        .playerToMove = undefined,
+        .board = [1]?Stone{null} ** 9,
+        .numEmptyCells = undefined,
+        .gameResult = null,
+        .winner = null,
+        .numColumns = 3,
+        .numRows = 3,
     };
-    var gameResult: ?GameResult = null;
-    var winner: ?*const Player = null;
+    gameState.playerToMove = &gameState.players[0];
+    gameState.numEmptyCells = gameState.board.len;
+    print("{s}\n", .{gameState.players[0].name});
 
     const boardColor = ray.DARKBROWN;
     const boardWidth: f32 = 300;
@@ -65,18 +101,9 @@ pub fn main() !void {
     const boardY: f32 = @as(f32, @floatFromInt(windowHeight)) / 2 - boardHeight / 2;
     print("boardX: {d}\n", .{boardX});
 
-    const numColumns = 3;
-    const numRows = 3;
     const cellWidth: f32 = boardWidth / 3;
     const cellHeight: f32 = boardHeight / 3;
 
-    //var board: [3][3]?Stone; //?
-    var board: [9]?Stone = [1]?Stone{null} ** 9;
-    var numEmptyCells: u8 = board.len; 
-
-    var turn: *const Player = &players[0];
-
-    var gameOver: bool = false;
     //const allocator = std.heap.page_allocator;
     //var gameMessage: []const u8 = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
 
@@ -88,12 +115,59 @@ pub fn main() !void {
     //var angle: f32 = std.math.pi / 2.0;
     var playAnimation = false;
 
+    var waitMode = false;
+    var waitedNumFrames: usize = undefined;
+
     while (!ray.WindowShouldClose()) {
+        if (gameState.gameResult == null and gameState.playerToMove.isComputer) {
+            if (!waitMode) {
+                waitMode = true;
+                waitedNumFrames = 1;
+            } else {
+                if (waitedNumFrames == 3 * 60) {
+                    waitMode = false;
+
+                    // generate a random integer in range 0 ... numEmptyCells-1
+                    const random = getRandomNumber(gameState.numEmptyCells-1);
+                    assert(random > -1 and random < gameState.numEmptyCells);
+
+                    var count: usize = 0;
+                    for (gameState.board, 0..) |cell, index| {
+                        if (cell == null) {
+                            if (count == random) {
+                                makeMove(&gameState, index);
+                                if(gameState.gameResult) |result| {
+                                    switch(result) {
+                                        .WIN => {
+                                            print("{s} wins!\n", .{gameState.playerToMove.name});
+                                        },
+                                        .DRAW => {
+                                            print("A draw!\n", .{});
+                                        },
+                                    }
+                                }
+
+
+                                playAnimation = true;
+
+                                break;
+                            } else {
+                                count += 1;
+                            }
+                        }
+                    }
+                } else {
+                    print("waiting...\n", .{});
+                    waitedNumFrames += 1;
+                }
+            }
+        }
+
         const isDown = ray.IsMouseButtonDown(LEFT_MOUSE);
         const mouseWentDown = isDown and !wasDown;
         wasDown = isDown;
 
-        if (!gameOver) {
+        if (gameState.gameResult == null and !gameState.playerToMove.isComputer) {
             if (mouseWentDown) {
                 const x = ray.GetMouseX();
                 const y = ray.GetMouseY();
@@ -102,57 +176,23 @@ pub fn main() !void {
                     const by = @as(u8, @intFromFloat(@floor((@as(f32, @floatFromInt(y)) - boardY) / cellHeight)));
 
                     assert(bx >= 0 and by >= 0);
-                    assert(bx < numColumns and by < numRows);
-                    const index: usize = @intCast(by * numColumns + bx);
+                    assert(bx < gameState.numColumns and by < gameState.numRows);
+                    const index: usize = @intCast(by * gameState.numColumns + bx);
 
-                    if (board[index] == null) {
-                        // Make a move
-                        board[index] = turn.stones;
-                        numEmptyCells -= 1;
+                    if (gameState.board[index] == null) {
+                        makeMove(&gameState, index);
+                        if (gameState.gameResult) |r| {
+                            switch(r) {
+                                .WIN => {
+                                    print("{s} wins!\n", .{gameState.winner.?.name});
+                                },
+                                .DRAW => {
+                                    print("A draw!\n", .{});
+                                },
+                            }
+                        }
 
                         playAnimation = true;
-
-                        //const isGameOver = getGameResult(board[0..], ...);
-                        //if (isGameOver.yap) {
-                        //    switch (isGameOver.result) {
-                        //        .WIN => {
-                        //            gameState.gameOn = false;
-                        //        },
-                        //        .DRAW => {
-                        //            gameState.gameOn = false;
-                        //        },
-                        //    }
-                        //} else {
-                        //    // switch turn
-                        //}
-
-                        if (isWin(board[0..], @intCast(bx), @intCast(by), numColumns)) {
-                            gameOver = true;
-                            gameResult = GameResult.WIN_LOSS;
-                            winner = turn;
-
-                            print("{s} wins\n", .{winner.?.name});
-
-                            //allocator.free(gameMessage);
-                            //gameMessage = try std.fmt.allocPrint(allocator, "{s} wins!", .{stoneToString(turn)});
-
-                            //for (&board) |*cell| {
-                            //    cell.* = 0;
-                            //}
-                        } else if (numEmptyCells == 0) {
-                            gameOver = true;
-                            gameResult = GameResult.DRAW;
-
-                            print("draw\n", .{});
-
-                            //allocator.free(gameMessage);
-                            //gameMessage = try std.fmt.allocPrint(allocator, "A draw.", .{});
-                        } else {
-                            turn = if (turn == &players[0]) &players[1] else &players[0];
-
-                            //allocator.free(gameMessage);
-                            //gameMessage = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
-                        }
                     } else {
                         print("Can't place a stone there!\n", .{});
                     }
@@ -183,7 +223,7 @@ pub fn main() !void {
         const shortenBy = 10;
         const startY = @round(boardY + shortenBy);
         const endY = @round(boardY + boardHeight - shortenBy);
-        for (1..numColumns) |i| {
+        for (1..gameState.numColumns) |i| {
             const x: i32 = @as(i32, @intFromFloat(boardX)) + @as(i32, @intCast(i)) * @as(i32, @intFromFloat(cellWidth));
             ray.DrawLine(x, startY, x, endY, ray.BLACK);
         }
@@ -191,18 +231,18 @@ pub fn main() !void {
         // Draw horizontal lines
         const startX = @round(boardX);
         const endX = @round(boardX + boardWidth);
-        for (1..numRows) |i| {
+        for (1..gameState.numRows) |i| {
             const y: i32 = @as(i32, @intFromFloat(boardY)) + @as(i32, @intCast(i)) * @as(i32, @intFromFloat(cellHeight));
             ray.DrawLine(startX, y, endX, y, ray.BLACK);
         }
 
         // Draw stones
-        for (board, 0..) |cell, j| {
+        for (gameState.board, 0..) |cell, j| {
             if (cell == null) continue;
 
             const i: u8 = @intCast(j);
-            const x: f32 = @floatFromInt(i % numColumns);
-            const y: f32 = @floatFromInt(i / numColumns);
+            const x: f32 = @floatFromInt(i % gameState.numColumns);
+            const y: f32 = @floatFromInt(i / gameState.numColumns);
             const stoneX: i32 = @intFromFloat(@round(boardX + x * cellWidth + cellWidth / 2));
             const stoneY = @as(i32, @intFromFloat(@round(boardY + y * cellHeight + cellHeight / 2)));
             const stoneRadius = cellWidth / 3;
@@ -250,56 +290,61 @@ pub fn main() !void {
         //    ray.DrawCircle(stonesX[n], stonesY, 24, colors[n]);
         //}
 
-        const colors = [_]ray.Color{
-            ray.BLACK,
-            ray.WHITE,
-        };
-        var turnStoneColor = colors[@intFromEnum(turn.stones)];
+        if (gameState.gameResult == null) {
+            const colors = [_]ray.Color{
+                ray.BLACK,
+                ray.WHITE,
+            };
+            var turnStoneColor = colors[@intFromEnum(gameState.playerToMove.stones)];
 
-        const x: f32 = 24.1;
-        const y: f32 = 24;
-        const maxWidth = 64;
-        const maxHeight = 64;
+            const x: f32 = 24.1;
+            const y: f32 = 24;
+            const maxWidth = 64;
+            const maxHeight = 64;
 
-        var width: f32 = maxWidth;
-        const height: f32 = maxHeight;
-        if (playAnimation) {
-            print("animation (angle = {d})\n", .{angle});
-            width = maxWidth * @abs(std.math.cos(angle));
-            if (angle < std.math.pi / 2.0) {
-                turnStoneColor = if(@intFromEnum(turn.stones) == 0) colors[1] else colors[0];
+            var width: f32 = maxWidth;
+            const height: f32 = maxHeight;
+            if (playAnimation) {
+                //print("animation (angle = {d})\n", .{angle});
+                width = maxWidth * @abs(std.math.cos(angle));
+                if (angle < std.math.pi / 2.0) {
+                    turnStoneColor = if(@intFromEnum(gameState.playerToMove.stones) == 0) colors[1] else colors[0];
+                }
+                //angle += std.math.pi / 128.0;
+                angle += std.math.pi / 32.0;
+                //angle += std.math.pi / 16.0;
+                if (angle >= std.math.pi) {
+                    playAnimation = false;
+                    angle = 0;
+                }
             }
-            //angle += std.math.pi / 128.0;
-            angle += std.math.pi / 32.0;
-            //angle += std.math.pi / 16.0;
-            if (angle >= std.math.pi) {
-                playAnimation = false;
-                angle = 0;
-            }
+
+            ray.DrawRectangle(@intFromFloat(@round(x + ((maxWidth - width) / 2))), @round(y), @intFromFloat(@round(width)), maxHeight, ray.BROWN);
+
+            const radiusH = width / 2;
+            const radiusV = height / 2;
+            const centerX: i32 = @intFromFloat(@round(x + maxWidth / 2));
+            const centerY: i32 = @intFromFloat(@round(y + maxHeight / 2));
+            ray.DrawEllipse(centerX, centerY, radiusH * 0.7, radiusV * 0.7, turnStoneColor);
+            //ray.DrawEllipse(centerX, centerY, radiusH * 0.5, radiusV * 0.5, turnStoneColor);
+
+            const lineThick = 6;
+            const rectWidth = if(width < lineThick) lineThick else width;
+            const rectangle = ray.Rectangle{.x = x + (maxWidth - rectWidth) / 2, .y = y, .width = rectWidth, .height = height};
+            //const rectangle = ray.Rectangle{.x = x - lineThick, .y = y - lineThick, .width = width + 2 * lineThick, .height = height + 2 * lineThick};
+            ray.DrawRectangleLinesEx(rectangle, lineThick, ray.RED);
+            //ray.DrawRectangleLinesEx(rectangle, lineThick, ray.DARKBROWN);
         }
-
-        ray.DrawRectangle(@intFromFloat(@round(x + ((maxWidth - width) / 2))), @round(y), @intFromFloat(@round(width)), maxHeight, ray.BROWN);
-
-        const radiusH = width / 2;
-        const radiusV = height / 2;
-        const centerX: i32 = @intFromFloat(@round(x + maxWidth / 2));
-        const centerY: i32 = @intFromFloat(@round(y + maxHeight / 2));
-        ray.DrawEllipse(centerX, centerY, radiusH * 0.7, radiusV * 0.7, turnStoneColor);
-        //ray.DrawEllipse(centerX, centerY, radiusH * 0.5, radiusV * 0.5, turnStoneColor);
-
-        const lineThick = 6;
-        const rectWidth = if(width < lineThick) lineThick else width;
-        const rectangle = ray.Rectangle{.x = x + (maxWidth - rectWidth) / 2, .y = y, .width = rectWidth, .height = height};
-        //const rectangle = ray.Rectangle{.x = x - lineThick, .y = y - lineThick, .width = width + 2 * lineThick, .height = height + 2 * lineThick};
-        ray.DrawRectangleLinesEx(rectangle, lineThick, ray.RED);
-        //ray.DrawRectangleLinesEx(rectangle, lineThick, ray.DARKBROWN);
 
         ray.EndDrawing();
     }
 }
 
-fn isWin(board: []?Stone, lastMoveX: i8, lastMoveY: i8, columnsInRow: u8) bool {
-    const lastMoveStone = board[getIndex(lastMoveX, lastMoveY, columnsInRow)];
+fn isWin(board: []?Stone, index: usize, columnsInRow: u8) bool {
+    const lastMoveStone = board[index];
+    const lastMoveX: i8 = @intCast(index % columnsInRow);
+    const lastMoveY: i8 = @intCast(index / columnsInRow);
+    //const lastMoveStone = board[getIndex(lastMoveX, lastMoveY, columnsInRow)];
     print("type lastMoveStone: {}\n", .{@TypeOf(lastMoveStone)});
     //assert(lastMoveStone == .WHITE or lastMoveStone == .BLACK);
     assert(lastMoveStone != null);
@@ -342,4 +387,24 @@ fn isWin(board: []?Stone, lastMoveX: i8, lastMoveY: i8, columnsInRow: u8) bool {
 
 fn getIndex(x: i8, y: i8, columnsInRow: u8) usize {
     return @intCast(y * @as(i8, @intCast(columnsInRow)) + x);
+}
+
+//const Move = struct {
+//    index: usize,
+//    player: *Player
+//};
+//fn makeMove(gameState: *GameState, move: Move) ?GameResult {
+fn makeMove(gameState: *GameState, index: usize) void {
+    assert(gameState.board[index] == null);
+    gameState.board[index] = gameState.playerToMove.stones;
+    gameState.numEmptyCells -= 1;
+
+    if (isWin(gameState.board[0..], index, gameState.numColumns)) {
+        gameState.gameResult = GameResult.WIN;
+        gameState.winner = gameState.playerToMove;
+    } else if (gameState.numEmptyCells == 0) {
+        gameState.gameResult = GameResult.DRAW;
+    } else {
+        gameState.playerToMove = if (gameState.playerToMove == &gameState.players[0]) &gameState.players[1] else &gameState.players[0];
+    }
 }
