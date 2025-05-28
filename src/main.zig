@@ -1,11 +1,9 @@
 
 // todo:
-// - who won? (black? white?)
-// - highlight the winning row in some way (make stones bigger) 
 // - play sounds when game ends (win/loss, draw)
 // - play sounds when a move is made / stone placed
-// - who's turn? 
 // - consider different board type (place stones at the grid-line intersections, larger board)
+// - can we get the # of type conversions down?
 
 //@ mouse coordinates are off when the mouse hasn't moved yet...
 
@@ -14,22 +12,16 @@ const ray = @cImport(@cInclude("raylib.h"));
 
 const print = std.debug.print;
 const assert = std.debug.assert;
+const allocator = std.heap.page_allocator;
 
 const Stone = enum {
     BLACK,
     WHITE,
 };
 
-const GameResult = enum {
-    WIN,
-    DRAW
+const GameResult = struct {
+    winner: ?Stone //'null' if draw
 };
-
-//const Game = struct {
-//    players: [2]Player,
-//    wasDraw: bool,
-//    winner: ?*Player // null if draw
-//};
 
 const Player = struct {
     name: []const u8,
@@ -38,25 +30,39 @@ const Player = struct {
 };
 
 const GameState = struct {
-    players: [2]Player,
-    playerToMove: *const Player,
-    board: [9]?Stone,
-    numEmptyCells: u8,
-    gameResult: ?GameResult, // 'null' if game is on
-    winner: ?*const Player,
+    board: []?Stone,
+    playerToMove: Stone,
+    numEmptyCells: i32 = undefined,
 
     //?
-    winningRow: [3]i8,
+    winningRow: [3]i8 = undefined,
 
     //@ board size should depend on these:
-    numColumns: i8,
-    numRows: i8,
+    numCols: i32,
+    numRows: i32,
 };
 
-fn stoneToString(stone: Stone) []const u8 {
-    const stoneNames = [2][]const u8{"BLACK", "WHITE"};
-    return stoneNames[@intFromEnum(stone)];
+fn makeGameState(numRows: i32, numCols: i32) !GameState {
+    const boardMemory = try allocator.alloc(?Stone, @intCast(numRows * numCols));
+    for (boardMemory) |*cell| {
+        cell.* = null;
+    }
+
+    var gameState: GameState = .{
+        .board = boardMemory ,
+        .playerToMove = .BLACK,
+        .numRows = numRows,
+        .numCols = numCols,
+    };
+    gameState.numEmptyCells = @intCast(gameState.board.len);
+
+    return gameState;
 }
+
+//fn stoneToString(stone: Stone) []const u8 {
+//    const stoneNames = [2][]const u8{"BLACK", "WHITE"};
+//    return stoneNames[@intFromEnum(stone)];
+//}
 
 fn getRandomNumber(max: usize) usize {
     // Seed with current time or other entropy
@@ -68,7 +74,7 @@ fn getRandomNumber(max: usize) usize {
     // Generate a random u8 between 0 and 255
     const r = rand.int(usize);
 
-    return r % max+1;
+    return r % (max + 1);
 }
 
 pub fn main() !void {
@@ -80,33 +86,25 @@ pub fn main() !void {
     //ray.SetTargetFPS(1);
     ray.SetTargetFPS(60);
 
-    const player1 = Player {.name="Black", .stones=Stone.BLACK, .isComputer=false};
-    const player2 = Player {.name="White", .stones=Stone.WHITE, .isComputer=true};
+    var gameResult: ?GameResult = null; //'null' if game is on
 
-    var gameState: GameState = GameState {
-        .players = [2]Player {player1, player2},
-        .playerToMove = undefined,
-        .board = [1]?Stone{null} ** 9,
-        .numEmptyCells = undefined,
-        .gameResult = null,
-        .winner = null,
-        .winningRow = undefined,
-        .numColumns = 3,
-        .numRows = 3,
+    const players: [2]Player = .{
+        .{.name="Black", .stones=Stone.BLACK, .isComputer=true},
+        .{.name="White", .stones=Stone.WHITE, .isComputer=false}
     };
-    gameState.playerToMove = &gameState.players[0];
-    gameState.numEmptyCells = gameState.board.len;
-    print("{s}\n", .{gameState.players[0].name});
+
+    const numRows = 3;
+    const numCols = 3;
+    var gameState = try makeGameState(numRows, numCols);
 
     const boardColor = ray.DARKBROWN;
     const boardWidth: f32 = 300;
     const boardHeight: f32 = 300;
     const boardX: f32 = @as(f32, @floatFromInt(windowWidth)) / 2 - boardWidth / 2;
     const boardY: f32 = @as(f32, @floatFromInt(windowHeight)) / 2 - boardHeight / 2;
-    print("boardX: {d}\n", .{boardX});
 
-    const cellWidth: f32 = boardWidth / 3;
-    const cellHeight: f32 = boardHeight / 3;
+    const cellWidth: f32 = boardWidth / numCols;
+    const cellHeight: f32 = boardHeight / numRows;
 
     //const allocator = std.heap.page_allocator;
     //var gameMessage: []const u8 = try std.fmt.allocPrint(allocator, "{s}'s move...", .{stoneToString(turn)});
@@ -115,63 +113,50 @@ pub fn main() !void {
     //const RIGHT_BUTTON = 1;
     var wasDown: bool = ray.IsMouseButtonDown(LEFT_MOUSE);
 
-    var angle: f32 = 0;
-    //var angle: f32 = std.math.pi / 2.0;
-    var playAnimation = false;
-
+    // computer move wait time
     var waitMode = false;
     var waitedNumFrames: usize = undefined;
 
+    // move animation
+    var playAnimation = false;
+    var angle: f32 = 0;
+    //var angle: f32 = std.math.pi / 2.0;
+
     // winning row animation
-    // 1 -> 1.1
     var winningRowAnimation = false;
-    const radiusFactorMax: f32 = 1.1;
     const radiusFactorMin: f32 = 1.0;
-    const incr = (radiusFactorMax - radiusFactorMin) / 16;
+    const radiusFactorMax: f32 = 1.1;
+    const radiusFactorIncrement = (radiusFactorMax - radiusFactorMin) / 16;
     var radiusFactor: f32 = radiusFactorMin;
 
     while (!ray.WindowShouldClose()) {
-        if (winningRowAnimation) {
-            radiusFactor += incr;
-            if(radiusFactor > radiusFactorMax) radiusFactor = radiusFactorMax;
-            if(radiusFactor == radiusFactorMax) winningRowAnimation = false;
-        }
+        const isDown = ray.IsMouseButtonDown(LEFT_MOUSE);
+        const mouseWentDown = isDown and !wasDown;
+        wasDown = isDown;
 
-        if (gameState.gameResult == null and gameState.playerToMove.isComputer) {
+        if (gameResult == null and getPlayerToMove(&gameState, &players).isComputer) {
             if (!waitMode) {
                 waitMode = true;
                 waitedNumFrames = 1;
             } else {
-                if (waitedNumFrames == 3 * 60) {
+                if (waitedNumFrames == 1 * 60) {
                     waitMode = false;
 
-                    // generate a random integer in range 0 ... numEmptyCells-1
-                    const random = getRandomNumber(gameState.numEmptyCells-1);
-                    assert(random > -1 and random < gameState.numEmptyCells);
+                    const moveIndex = getComputerMove(&gameState);
+                    gameResult = makeMove(&gameState, moveIndex);
+                    if (gameResult) |result| {
+                        if (result.winner) |winner| {
+                            const winnerName = players[@intFromEnum(winner)].name;
+                            print("{s} wins!\n", .{winnerName});
 
-                    var count: usize = 0;
-                    for (gameState.board, 0..) |cell, index| {
-                        if (cell == null) {
-                            if (count == random) {
-                                makeMove(&gameState, index);
-                                if(gameState.gameResult) |result| {
-                                    switch(result) {
-                                        .WIN => {
-                                            print("{s} wins!\n", .{gameState.playerToMove.name});
-                                        },
-                                        .DRAW => {
-                                            print("A draw!\n", .{});
-                                        },
-                                    }
-                                } else {
-                                    playAnimation = true;
-                                }
-
-                                break;
-                            } else {
-                                count += 1;
-                            }
+                            winningRowAnimation = true;
+                        } else {
+                            print("A draw!\n", .{});
                         }
+                    } else {
+                        gameState.playerToMove = if (gameState.playerToMove == .BLACK) .WHITE else .BLACK;
+
+                        playAnimation = true;
                     }
                 } else {
                     print("waiting...\n", .{});
@@ -180,35 +165,31 @@ pub fn main() !void {
             }
         }
 
-        const isDown = ray.IsMouseButtonDown(LEFT_MOUSE);
-        const mouseWentDown = isDown and !wasDown;
-        wasDown = isDown;
-
-        if (gameState.gameResult == null and !gameState.playerToMove.isComputer) {
+        if (gameResult == null and !getPlayerToMove(&gameState, &players).isComputer) {
             if (mouseWentDown) {
-                const x = ray.GetMouseX();
-                const y = ray.GetMouseY();
-                if (x >= @round(boardX) and x < @round(boardX + boardWidth) and y >= @round(boardY) and y < @round(boardY + boardHeight)) {
-                    const bx = @as(i8, @intFromFloat(@floor((@as(f32, @floatFromInt(x)) - boardX) / cellWidth)));
-                    const by = @as(i8, @intFromFloat(@floor((@as(f32, @floatFromInt(y)) - boardY) / cellHeight)));
+                const mouseX: f32 = @floatFromInt(ray.GetMouseX());
+                const mouseY: f32 = @floatFromInt(ray.GetMouseY());
 
-                    assert(bx >= 0 and by >= 0);
-                    assert(bx < gameState.numColumns and by < gameState.numRows);
-                    const index: usize = @intCast(by * gameState.numColumns + bx);
+                const x: i32 = @intFromFloat(@floor((mouseX - boardX) / cellWidth));
+                const y: i32 = @intFromFloat(@floor((mouseY - boardY) / cellHeight));
 
-                    if (gameState.board[index] == null) {
-                        makeMove(&gameState, index);
-                        if (gameState.gameResult) |result| {
-                            switch(result) {
-                                .WIN => {
-                                    print("{s} wins!\n", .{gameState.winner.?.name});
-                                    winningRowAnimation = true;
-                                },
-                                .DRAW => {
-                                    print("A draw!\n", .{});
-                                },
+                if (x > -1 and x < gameState.numCols and y > -1 and y < gameState.numRows) {
+                    const moveIndex: usize = @intCast(y * gameState.numCols + x);
+
+                    if (gameState.board[moveIndex] == null) {
+                        gameResult = makeMove(&gameState, moveIndex);
+                        if (gameResult) |result| {
+                            if (result.winner) |winner| {
+                                const winnerName = players[@intFromEnum(winner)].name;
+                                print("{s} wins!\n", .{winnerName});
+
+                                winningRowAnimation = true;
+                            } else {
+                                print("A draw!\n", .{});
                             }
                         } else {
+                            gameState.playerToMove = if (gameState.playerToMove == .BLACK) .WHITE else .BLACK;
+
                             playAnimation = true;
                         }
                     } else {
@@ -241,7 +222,7 @@ pub fn main() !void {
         const shortenBy = 10;
         const startY = @round(boardY + shortenBy);
         const endY = @round(boardY + boardHeight - shortenBy);
-        for (1..@intCast(gameState.numColumns)) |i| {
+        for (1..@intCast(gameState.numCols)) |i| {
             const x: i32 = @as(i32, @intFromFloat(boardX)) + @as(i32, @intCast(i)) * @as(i32, @intFromFloat(cellWidth));
             ray.DrawLine(x, startY, x, endY, ray.BLACK);
         }
@@ -261,7 +242,7 @@ pub fn main() !void {
             const i: i8 = @intCast(j);
 
             var isWinningStone = false;
-            if(gameState.winner != null) {
+            if (gameResult != null and gameResult.?.winner != null) {
                 for(gameState.winningRow) |wi| {
                     if(wi == i) {
                         isWinningStone = true;
@@ -271,8 +252,8 @@ pub fn main() !void {
             }
 
             //const x = i % gameState.numColumns;
-            const x: f32 = @floatFromInt(@as(u8, @intCast(i)) % @as(u8, @intCast(gameState.numColumns)));
-            const y: f32 = @floatFromInt(@as(u8, @intCast(i)) / @as(u8, @intCast(gameState.numColumns)));
+            const x: f32 = @floatFromInt(@as(u8, @intCast(i)) % @as(u8, @intCast(gameState.numCols)));
+            const y: f32 = @floatFromInt(@as(u8, @intCast(i)) / @as(u8, @intCast(gameState.numCols)));
             const stoneX: i32 = @intFromFloat(@round(boardX + x * cellWidth + cellWidth / 2));
             const stoneY = @as(i32, @intFromFloat(@round(boardY + y * cellHeight + cellHeight / 2)));
             const stoneRadius = cellWidth / 3;
@@ -321,12 +302,12 @@ pub fn main() !void {
         //    ray.DrawCircle(stonesX[n], stonesY, 24, colors[n]);
         //}
 
-        if (gameState.gameResult == null) {
+        if (gameResult == null) {
             const colors = [_]ray.Color{
                 ray.BLACK,
                 ray.WHITE,
             };
-            var turnStoneColor = colors[@intFromEnum(gameState.playerToMove.stones)];
+            var turnStoneColor = colors[@intFromEnum(gameState.playerToMove)];
 
             const x: f32 = 24.1;
             const y: f32 = 24;
@@ -339,7 +320,7 @@ pub fn main() !void {
                 //print("animation (angle = {d})\n", .{angle});
                 width = maxWidth * @abs(std.math.cos(angle));
                 if (angle < std.math.pi / 2.0) {
-                    turnStoneColor = if(@intFromEnum(gameState.playerToMove.stones) == 0) colors[1] else colors[0];
+                    turnStoneColor = if(@intFromEnum(gameState.playerToMove) == 0) colors[1] else colors[0];
                 }
                 //angle += std.math.pi / 128.0;
                 angle += std.math.pi / 32.0;
@@ -368,6 +349,12 @@ pub fn main() !void {
         }
 
         ray.EndDrawing();
+
+        if (winningRowAnimation) {
+            radiusFactor += radiusFactorIncrement;
+            if(radiusFactor > radiusFactorMax) radiusFactor = radiusFactorMax;
+            if(radiusFactor == radiusFactorMax) winningRowAnimation = false;
+        }
     }
 }
 
@@ -426,17 +413,48 @@ fn getIndex(x: i8, y: i8, columnsInRow: i8) usize {
 //    player: *Player
 //};
 //fn makeMove(gameState: *GameState, move: Move) ?GameResult {
-fn makeMove(gameState: *GameState, index: usize) void {
-    assert(gameState.board[index] == null);
-    gameState.board[index] = gameState.playerToMove.stones;
+fn makeMove(gameState: *GameState, moveIndex: usize) ?GameResult {
+    assert(gameState.board[moveIndex] == null);
+
+    const moveStone = gameState.playerToMove;
+    gameState.board[moveIndex] = moveStone;
+
     gameState.numEmptyCells -= 1;
 
-    if (isWin(gameState.board[0..], index, gameState.numColumns, gameState)) {
-        gameState.gameResult = GameResult.WIN;
-        gameState.winner = gameState.playerToMove;
+    if (isWin(gameState.board[0..], moveIndex, @intCast(gameState.numCols), gameState)) {
+        return .{.winner = moveStone};
     } else if (gameState.numEmptyCells == 0) {
-        gameState.gameResult = GameResult.DRAW;
+        return .{.winner = null};
     } else {
-        gameState.playerToMove = if (gameState.playerToMove == &gameState.players[0]) &gameState.players[1] else &gameState.players[0];
+        return null;
     }
+}
+
+fn getPlayerToMove(gameState: *GameState, players: []const Player) Player {
+    const stones = gameState.playerToMove;
+    for (players) |player| {
+        if (player.stones == stones) {
+            return player;
+        }
+    }
+    unreachable;
+}
+
+fn getComputerMove(gameState: *GameState) usize {
+    // generate a random integer in range 0 ... numEmptyCells-1
+    assert(gameState.numEmptyCells > 0);
+    const randomIndex = getRandomNumber(@intCast(gameState.numEmptyCells-1));
+    assert(randomIndex > -1 and randomIndex < gameState.numEmptyCells);
+
+    var emptyCellIndex: usize = 0;
+    for (gameState.board, 0..) |cell, index| {
+        if (cell == null) {
+            if (emptyCellIndex == randomIndex) {
+                return index;
+            } else {
+                emptyCellIndex += 1;
+            }
+        }
+    }
+    unreachable;
 }
