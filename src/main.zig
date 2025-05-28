@@ -4,6 +4,7 @@
 // - play sounds when a move is made / stone placed
 // - consider different board type (place stones at the grid-line intersections, larger board)
 // - can we get the # of type conversions down?
+// - maybe we should highlight all winning rows (if more than one)?
 
 //@ mouse coordinates are off when the mouse hasn't moved yet...
 
@@ -20,7 +21,7 @@ const Stone = enum {
 };
 
 const GameResult = struct {
-    winner: ?Stone //'null' if draw
+    winner: ?*const Player //'null' if draw
 };
 
 const Player = struct {
@@ -31,7 +32,9 @@ const Player = struct {
 
 const GameState = struct {
     board: []?Stone,
-    playerToMove: Stone,
+    players: [2] *const Player,
+    playerToMove: *const Player = undefined,
+
     numEmptyCells: i32 = undefined,
 
     //?
@@ -42,7 +45,7 @@ const GameState = struct {
     numRows: i32,
 };
 
-fn makeGameState(numRows: i32, numCols: i32) !GameState {
+fn makeGameState(numRows: i32, numCols: i32, player1: *const Player, player2: *const Player) !GameState {
     const boardMemory = try allocator.alloc(?Stone, @intCast(numRows * numCols));
     for (boardMemory) |*cell| {
         cell.* = null;
@@ -50,11 +53,12 @@ fn makeGameState(numRows: i32, numCols: i32) !GameState {
 
     var gameState: GameState = .{
         .board = boardMemory ,
-        .playerToMove = .BLACK,
         .numRows = numRows,
         .numCols = numCols,
+        .players = .{player1, player2},
     };
     gameState.numEmptyCells = @intCast(gameState.board.len);
+    gameState.playerToMove = gameState.players[0];
 
     return gameState;
 }
@@ -89,13 +93,13 @@ pub fn main() !void {
     var gameResult: ?GameResult = null; //'null' if game is on
 
     const players: [2]Player = .{
-        .{.name="Black", .stones=Stone.BLACK, .isComputer=true},
-        .{.name="White", .stones=Stone.WHITE, .isComputer=false}
+        .{.name="Batman", .stones=Stone.BLACK, .isComputer=false},
+        .{.name="Supercomputer", .stones=Stone.WHITE, .isComputer=true}
     };
 
     const numRows = 3;
     const numCols = 3;
-    var gameState = try makeGameState(numRows, numCols);
+    var gameState = try makeGameState(numRows, numCols, &players[0], &players[1]);
 
     const boardColor = ray.DARKBROWN;
     const boardWidth: f32 = 300;
@@ -134,7 +138,7 @@ pub fn main() !void {
         const mouseWentDown = isDown and !wasDown;
         wasDown = isDown;
 
-        if (gameResult == null and getPlayerToMove(&gameState, &players).isComputer) {
+        if (gameResult == null and gameState.playerToMove.isComputer) {
             if (!waitMode) {
                 waitMode = true;
                 waitedNumFrames = 1;
@@ -146,16 +150,13 @@ pub fn main() !void {
                     gameResult = makeMove(&gameState, moveIndex);
                     if (gameResult) |result| {
                         if (result.winner) |winner| {
-                            const winnerName = players[@intFromEnum(winner)].name;
-                            print("{s} wins!\n", .{winnerName});
+                            print("{s} wins!\n", .{winner.name});
 
                             winningRowAnimation = true;
                         } else {
                             print("A draw!\n", .{});
                         }
                     } else {
-                        gameState.playerToMove = if (gameState.playerToMove == .BLACK) .WHITE else .BLACK;
-
                         playAnimation = true;
                     }
                 } else {
@@ -165,7 +166,7 @@ pub fn main() !void {
             }
         }
 
-        if (gameResult == null and !getPlayerToMove(&gameState, &players).isComputer) {
+        if (gameResult == null and !gameState.playerToMove.isComputer) {
             if (mouseWentDown) {
                 const mouseX: f32 = @floatFromInt(ray.GetMouseX());
                 const mouseY: f32 = @floatFromInt(ray.GetMouseY());
@@ -180,16 +181,13 @@ pub fn main() !void {
                         gameResult = makeMove(&gameState, moveIndex);
                         if (gameResult) |result| {
                             if (result.winner) |winner| {
-                                const winnerName = players[@intFromEnum(winner)].name;
-                                print("{s} wins!\n", .{winnerName});
+                                print("{s} wins!\n", .{winner.name});
 
                                 winningRowAnimation = true;
                             } else {
                                 print("A draw!\n", .{});
                             }
                         } else {
-                            gameState.playerToMove = if (gameState.playerToMove == .BLACK) .WHITE else .BLACK;
-
                             playAnimation = true;
                         }
                     } else {
@@ -307,7 +305,7 @@ pub fn main() !void {
                 ray.BLACK,
                 ray.WHITE,
             };
-            var turnStoneColor = colors[@intFromEnum(gameState.playerToMove)];
+            var turnStoneColor = colors[@intFromEnum(gameState.playerToMove.stones)];
 
             const x: f32 = 24.1;
             const y: f32 = 24;
@@ -320,7 +318,7 @@ pub fn main() !void {
                 //print("animation (angle = {d})\n", .{angle});
                 width = maxWidth * @abs(std.math.cos(angle));
                 if (angle < std.math.pi / 2.0) {
-                    turnStoneColor = if(@intFromEnum(gameState.playerToMove) == 0) colors[1] else colors[0];
+                    turnStoneColor = if(@intFromEnum(gameState.playerToMove.stones) == 0) colors[1] else colors[0];
                 }
                 //angle += std.math.pi / 128.0;
                 angle += std.math.pi / 32.0;
@@ -385,7 +383,7 @@ fn isWin(board: []?Stone, index: usize, columnsInRow: i8, gameState: *GameState)
                 const y = lastMoveY + dy;
 
                 if (x < 0 or x > 2 or y < 0 or y > 2) break;
-                if (board[getIndex(x, y, columnsInRow)] != lastMoveStone) break;
+                if (board[@intCast(y * columnsInRow + x)] != lastMoveStone) break;
 
                 stoneCount += 1;
                 gameState.winningRow[stoneCount-1] = y * @as(i8, @intCast(columnsInRow)) + x;
@@ -404,9 +402,9 @@ fn isWin(board: []?Stone, index: usize, columnsInRow: i8, gameState: *GameState)
     return false;
 }
 
-fn getIndex(x: i8, y: i8, columnsInRow: i8) usize {
-    return @intCast(y * columnsInRow + x);
-}
+//fn getIndex(x: i8, y: i8, columnsInRow: i8) usize {
+//    return @intCast(y * columnsInRow + x);
+//}
 
 //const Move = struct {
 //    index: usize,
@@ -416,29 +414,30 @@ fn getIndex(x: i8, y: i8, columnsInRow: i8) usize {
 fn makeMove(gameState: *GameState, moveIndex: usize) ?GameResult {
     assert(gameState.board[moveIndex] == null);
 
-    const moveStone = gameState.playerToMove;
+    const moveStone = gameState.playerToMove.stones;
     gameState.board[moveIndex] = moveStone;
 
     gameState.numEmptyCells -= 1;
 
     if (isWin(gameState.board[0..], moveIndex, @intCast(gameState.numCols), gameState)) {
-        return .{.winner = moveStone};
+        return .{.winner = gameState.playerToMove};
     } else if (gameState.numEmptyCells == 0) {
         return .{.winner = null};
     } else {
+        gameState.playerToMove = if (gameState.playerToMove == gameState.players[0]) gameState.players[1] else gameState.players[0];
         return null;
     }
 }
 
-fn getPlayerToMove(gameState: *GameState, players: []const Player) Player {
-    const stones = gameState.playerToMove;
-    for (players) |player| {
-        if (player.stones == stones) {
-            return player;
-        }
-    }
-    unreachable;
-}
+//fn getPlayerToMove(gameState: *GameState, players: []const Player) Player {
+//    const stones = gameState.playerToMove;
+//    for (players) |player| {
+//        if (player.stones == stones) {
+//            return player;
+//        }
+//    }
+//    unreachable;
+//}
 
 fn getComputerMove(gameState: *GameState) usize {
     // generate a random integer in range 0 ... numEmptyCells-1
