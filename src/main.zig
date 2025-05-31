@@ -6,6 +6,8 @@
 // - can we get the # of type conversions down?
 // - maybe we should highlight all winning rows (if more than one)?
 
+// - numCols & numRows should go into a different data structure? board?
+
 //@ mouse coordinates are off when the mouse hasn't moved yet...
 
 const std = @import("std");
@@ -27,7 +29,9 @@ const GameResult = struct {
 const Player = struct {
     name: []const u8,
     stones: Stone,
-    isComputer: bool,
+
+    isComputer: bool, //@ dont really need this anymore
+    getNextMove: ?*const fn (*GameState) usize = null,
 };
 
 const GameState = struct {
@@ -52,7 +56,7 @@ fn makeGameState(numRows: i32, numCols: i32, player1: *const Player, player2: *c
     }
 
     var gameState: GameState = .{
-        .board = boardMemory ,
+        .board = boardMemory,
         .numRows = numRows,
         .numCols = numCols,
         .players = .{player1, player2},
@@ -93,8 +97,12 @@ pub fn main() !void {
     var gameResult: ?GameResult = null; //'null' if game is on
 
     const players: [2]Player = .{
-        .{.name="Batman", .stones=Stone.BLACK, .isComputer=false},
-        .{.name="Supercomputer", .stones=Stone.WHITE, .isComputer=true}
+        //.{.name="Batman", .stones=Stone.BLACK, .isComputer=false},
+        //.{.name="Batman", .stones=Stone.BLACK, .isComputer=true, .getNextMove=getComputerMoveRandomly},
+        .{.name="Supercomputer", .stones=Stone.BLACK, .isComputer=true, .getNextMove=getComputerMoveRecursively},
+        //.{.name="Supercomputer2", .stones=Stone.WHITE, .isComputer=true, .getNextMove=getComputerMoveRecursively},
+        //.{.name="outdated model", .stones=Stone.WHITE, .isComputer=true, .getNextMove=getComputerMoveRandomly},
+        .{.name="Batman", .stones=Stone.WHITE, .isComputer=false},
     };
 
     const numRows = 3;
@@ -146,7 +154,9 @@ pub fn main() !void {
                 if (waitedNumFrames == 1 * 60) {
                     waitMode = false;
 
-                    const moveIndex = getComputerMove(&gameState);
+                    //const moveIndex = getComputerMove(&gameState);
+                    //const moveIndex = getComputerMoveOneMoveAhead(&gameState);
+                    const moveIndex = gameState.playerToMove.getNextMove.?(&gameState);
                     gameResult = makeMove(&gameState, moveIndex);
                     if (gameResult) |result| {
                         if (result.winner) |winner| {
@@ -160,7 +170,6 @@ pub fn main() !void {
                         playAnimation = true;
                     }
                 } else {
-                    print("waiting...\n", .{});
                     waitedNumFrames += 1;
                 }
             }
@@ -411,6 +420,7 @@ fn isWin(board: []?Stone, index: usize, columnsInRow: i8, gameState: *GameState)
 //    player: *Player
 //};
 //fn makeMove(gameState: *GameState, move: Move) ?GameResult {
+
 fn makeMove(gameState: *GameState, moveIndex: usize) ?GameResult {
     assert(gameState.board[moveIndex] == null);
 
@@ -419,14 +429,24 @@ fn makeMove(gameState: *GameState, moveIndex: usize) ?GameResult {
 
     gameState.numEmptyCells -= 1;
 
+    var result: ?GameResult = null;
     if (isWin(gameState.board[0..], moveIndex, @intCast(gameState.numCols), gameState)) {
-        return .{.winner = gameState.playerToMove};
+        result = .{.winner = gameState.playerToMove};
     } else if (gameState.numEmptyCells == 0) {
-        return .{.winner = null};
-    } else {
-        gameState.playerToMove = if (gameState.playerToMove == gameState.players[0]) gameState.players[1] else gameState.players[0];
-        return null;
+        result = .{.winner = null};
     }
+
+    gameState.playerToMove = if (gameState.playerToMove == gameState.players[0]) gameState.players[1] else gameState.players[0];
+
+    return result;
+}
+
+fn unmakeMove(gameState: *GameState, moveIndex: usize) void {
+    assert(gameState.board[moveIndex] != null);
+
+    gameState.board[moveIndex] = null;
+    gameState.numEmptyCells += 1;
+    gameState.playerToMove = if (gameState.playerToMove == gameState.players[0]) gameState.players[1] else gameState.players[0];
 }
 
 //fn getPlayerToMove(gameState: *GameState, players: []const Player) Player {
@@ -439,7 +459,9 @@ fn makeMove(gameState: *GameState, moveIndex: usize) ?GameResult {
 //    unreachable;
 //}
 
-fn getComputerMove(gameState: *GameState) usize {
+fn getComputerMoveRandomly(gameState: *GameState) usize {
+    print("getComputerMoveRandomly()\n", .{});
+
     // generate a random integer in range 0 ... numEmptyCells-1
     assert(gameState.numEmptyCells > 0);
     const randomIndex = getRandomNumber(@intCast(gameState.numEmptyCells-1));
@@ -457,3 +479,280 @@ fn getComputerMove(gameState: *GameState) usize {
     }
     unreachable;
 }
+
+const MoveInfo = struct {
+    win: f32,
+    draw: f32,
+    loss: f32,
+};
+
+// assume best play by both players
+fn checkMoves(gameState: *GameState, opponent: bool) MoveInfo {
+    // simply assume game is not over
+
+    //var bestMove: ?usize = null;
+    var bestMoveInfo: ?MoveInfo = null;
+
+    //var moveBucket = std.ArrayList(usize).init(allocator);
+    //defer moveBucket.deinit();
+
+    const moves: std.ArrayList(usize) = getPossibleMoves(gameState); // for player to move next
+    defer moves.deinit();
+
+    for (moves.items) |move| {
+        const result = makeMove(gameState, move);
+        defer unmakeMove(gameState, move);
+
+        if (result) |r| {
+            if (r.winner) |_| {
+                //bestMove = move; // winning move
+                bestMoveInfo = if(opponent) .{.win=0, .draw=0, .loss=1} else .{.win=1, .draw=0, .loss=0};
+                break;
+            } else {
+                // draw -- the only move left on the board
+                assert(moves.items.len == 1);
+                //bestMove = move; 
+                bestMoveInfo = .{.win=0, .draw=1, .loss=0};
+                break;
+            }
+        } else {
+            const moveInfo = checkMoves(gameState, !opponent);
+            if (bestMoveInfo == null) {
+                bestMoveInfo = moveInfo;
+                //bestMove = move;
+            } else {
+                if (opponent) {
+                    const newScore = moveInfo.win - moveInfo.loss;
+                    const oldScore = bestMoveInfo.?.win - bestMoveInfo.?.loss;
+                    if (newScore < oldScore) {
+                        bestMoveInfo = moveInfo;
+                        //bestMove = move;
+                    }
+                } else {
+                    const newScore = moveInfo.win - moveInfo.loss;
+                    const oldScore = bestMoveInfo.?.win - bestMoveInfo.?.loss;
+                    if (newScore > oldScore) {
+                        bestMoveInfo = moveInfo;
+                        //bestMove = move;
+                    }
+                }
+            }
+        }
+    }
+
+    return bestMoveInfo.?;
+
+}
+
+// find the best move for whoever is to move next
+fn getComputerMoveRecursively(gameState: *GameState) usize {
+    // simply assume game is not over
+
+    var bestMove: ?usize = null;
+    var bestMoveInfo: ?MoveInfo = null;
+
+    //var moveBucket = std.ArrayList(usize).init(allocator);
+    //defer moveBucket.deinit();
+
+    const moves: std.ArrayList(usize) = getPossibleMoves(gameState); // for player to move next
+    defer moves.deinit();
+
+    for (moves.items) |move| {
+        const result = makeMove(gameState, move);
+        defer unmakeMove(gameState, move);
+
+        if (result) |r| {
+            if (r.winner) |_| {
+                bestMove = move; // winning move
+                break;
+            } else {
+                // draw -- there are no other moves
+                assert(moves.items.len == 1);
+                bestMove = move; // the only move left on the board
+            }
+        } else {
+            const moveInfo = checkMoves(gameState, true);
+            if (bestMove == null) {
+                bestMoveInfo = moveInfo;
+                bestMove = move;
+            } else {
+                const newScore = moveInfo.win - moveInfo.loss;
+                const oldScore = bestMoveInfo.?.win - bestMoveInfo.?.loss;
+                if (newScore > oldScore) {
+                    bestMoveInfo = moveInfo;
+                    bestMove = move;
+                }
+            }
+        }
+    }
+
+    return bestMove.?;
+}
+
+// find the best move for whoever is to move next
+fn getComputerMoveOneMoveAhead(gameState: *GameState) usize {
+    print("getComputerMoveOneMoveAhead()\n", .{});
+
+    //// check the board (win/loss/draw)
+    //const check: BoardCheck = checkBoard(gameState);
+    //assert(check.gameResult == null); // we expect game to not be over
+
+    // simply assume game is not over
+
+    var moveToSuggest: ?usize = null;
+
+    var moveBucket = std.ArrayList(usize).init(allocator);
+    defer moveBucket.deinit();
+
+    const moves: std.ArrayList(usize) = getPossibleMoves(gameState); // for player to move next
+    defer moves.deinit();
+
+    print("all possible moves: ", .{});
+    for (moves.items) |move| {
+        print("{}, ", .{move});
+    }
+    print("\n", .{});
+
+    for (moves.items) |move| {
+        const result = makeMove(gameState, move);
+        defer unmakeMove(gameState, move);
+        if (result) |r| {
+            if (r.winner) |_| {
+                moveToSuggest = move; // winning move
+                print("winning move: {}\n", .{move});
+                break;
+            } else {
+                // draw -- there are no other moves
+                assert(moves.items.len == 1);
+                moveToSuggest = move;
+                print("drawing move: {}\n", .{move});
+            }
+        } else {
+            moveBucket.append(move) catch |err| {
+                std.debug.panic("error: {}\n", .{err});
+            };
+        }
+    }
+
+    print("move bucket: ", .{});
+    for (moveBucket.items) |move| {
+        print("{}, ", .{move});
+    }
+    print("\n", .{});
+
+    // once done, if not obvious, select one randomly from the bucket
+    if (moveToSuggest == null) {
+        assert(moveBucket.items.len > 0);
+        const randomIndex = getRandomNumber(moveBucket.items.len - 1);
+        moveToSuggest = moveBucket.items[randomIndex];
+    }
+
+    return moveToSuggest.?;
+}
+
+fn getPossibleMoves(gameState: *GameState) std.ArrayList(usize) {
+    var moves = std.ArrayList(usize).init(allocator);
+
+    for (0..gameState.board.len) |i| {
+        if (gameState.board[i] == null) {
+            moves.append(i) catch |err| {
+                std.debug.panic("error: {}\n", .{err});
+            };
+        }
+    }
+ 
+    return moves;
+}
+
+//// identify game result, if any (win/loss, draw, impossible-to-arrive-at-state)
+//// return array of winning rows?
+//// wait, do I even f need that?
+//fn checkBoard(gameState: *GameState) void {
+//    const numInARow: i32 = 3;
+//    var blackInARows: i32 = 0;
+//    var whiteInARows: i32 = 0;
+//
+//    // iterate over rows
+//    for (0..@intCast(gameState.numRows)) |y| {
+//        countInARows(gameState, &blackInARows, &whiteInARows, 0, @intCast(y), 1, 0, numInARow);
+//    }
+//
+//    // iterate over columns
+//    for (0..@intCast(gameState.numCols)) |x| {
+//        countInARows(gameState, &blackInARows, &whiteInARows, @intCast(x), 0, 0, 1, numInARow);
+//    }
+//
+//    {
+//        // iterate over nw->se diagonals
+//        var startX: i32 = -(gameState.numRows - 1);
+//        while (startX < gameState.numCols) : (startX += 1) {
+//            var x: i32 = startX;
+//            var y: i32 = 0;
+//
+//            // ignore squares outside the board
+//            while (x < 0) : ({x += 1; y += 1;}) {
+//                //print("outside the board: x: {}, y: {}\n", .{x, y});
+//            }
+//
+//            countInARows(gameState, &blackInARows, &whiteInARows, x, y, 1, 1, numInARow);
+//        }
+//    }
+//
+//    {
+//        // iterate over ne->sw diagonals
+//        var startX: i32 = 0;
+//        while (startX < gameState.numCols + gameState.numRows - 1) : (startX += 1) {
+//            var x: i32 = startX;
+//            var y: i32 = 0;
+//
+//            // ignore squares outside the board
+//            while (x >= gameState.numCols) : ({x -= 1; y += 1;}) {
+//                //print("outside the board: x: {}, y: {}\n", .{x, y});
+//            }
+//
+//            countInARows(gameState, &blackInARows, &whiteInARows, x, y, -1, 1, numInARow);
+//        }
+//    }
+//
+//    print("black in-a-rows: {}, white in-a-rows: {}\n", .{blackInARows, whiteInARows});
+//}
+//
+//fn countInARows(gameState: *GameState, blackInARowsTotal: *i32, whiteInARowsTotal: *i32, startX: i32, startY: i32, dx: i32, dy: i32, numInARow: i32) void {
+//    var blackInARows: i32 = 0;
+//    var whiteInARows: i32 = 0;
+//
+//    var b: i32 = 0;
+//    var w: i32 = 0;
+//
+//    var x = startX;
+//    var y = startY;
+//
+//    while (x < gameState.numCols and y < gameState.numRows and x > -1 and y > -1) : ({x += dx; y += dy;}) {
+//        const index: usize = @intCast(y * gameState.numCols + x);
+//        if (gameState.board[index]) |stone| {
+//            // stone
+//            if (stone == .BLACK) {
+//                w = 0;
+//                b += 1;
+//                if (b == numInARow) {
+//                    blackInARows += 1;
+//                    b = 0;
+//                }
+//            } else {
+//                b = 0;
+//                w += 1;
+//                if (w == numInARow) {
+//                    whiteInARows += 1;
+//                    w = 0;
+//                }
+//            }
+//        } else {
+//            // empty cell
+//            b = 0;
+//            w = 0;
+//        }
+//    }
+//
+//    blackInARowsTotal.* += blackInARows;
+//    whiteInARowsTotal.* += whiteInARows;
+//}
