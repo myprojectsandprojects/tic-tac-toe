@@ -99,7 +99,8 @@ pub fn main() !void {
     const players: [2]Player = .{
         //.{.name="Batman", .stones=Stone.BLACK, .isComputer=false},
         //.{.name="Batman", .stones=Stone.BLACK, .isComputer=true, .getNextMove=getComputerMoveRandomly},
-        .{.name="Supercomputer", .stones=Stone.BLACK, .isComputer=true, .getNextMove=getComputerMoveRecursively},
+        .{.name="Supercomputer", .stones=Stone.BLACK, .isComputer=true, .getNextMove=getComputerMoveRecursively2},
+        //.{.name="Supercomputer", .stones=Stone.BLACK, .isComputer=true, .getNextMove=getComputerMoveRecursively},
         //.{.name="Supercomputer2", .stones=Stone.WHITE, .isComputer=true, .getNextMove=getComputerMoveRecursively},
         //.{.name="outdated model", .stones=Stone.WHITE, .isComputer=true, .getNextMove=getComputerMoveRandomly},
         .{.name="Batman", .stones=Stone.WHITE, .isComputer=false},
@@ -485,6 +486,103 @@ const MoveInfo = struct {
     draw: f32,
     loss: f32,
 };
+
+const MoveAndInfo = struct {move: usize, moveInfo: MoveInfo};
+
+// don't assume best play by either player, explore possibilities, calculate probabilities of outcomes
+fn checkMoves2(gameState: *GameState, opponent: bool) MoveInfo {
+    // simply assume game is not over
+
+    var moveBucket = std.ArrayList(MoveInfo).init(allocator);
+    defer moveBucket.deinit();
+
+    const moves: std.ArrayList(usize) = getPossibleMoves(gameState); // for player to move next
+    defer moves.deinit();
+
+    for (moves.items) |move| {
+        const result = makeMove(gameState, move);
+        defer unmakeMove(gameState, move);
+
+        if (result) |r| {
+            if (r.winner) |_| {
+                const moveInfo: MoveInfo = if(opponent) .{.win=0, .draw=0, .loss=1} else .{.win=1, .draw=0, .loss=0};
+                moveBucket.append(moveInfo) catch |err| std.debug.panic("error: {}\n", .{err});
+            } else {
+                // draw -- the only move left on the board
+                assert(moves.items.len == 1);
+
+                const moveInfo: MoveInfo = .{.win=0, .draw=1, .loss=0};
+                moveBucket.append(moveInfo) catch |err| std.debug.panic("error: {}\n", .{err});
+            }
+        } else {
+            const moveInfo = checkMoves2(gameState, !opponent);
+            moveBucket.append(moveInfo) catch |err| std.debug.panic("error: {}\n", .{err});
+        }
+    }
+
+    var result: MoveInfo = .{.win=0, .draw=0, .loss=0};
+    for (moveBucket.items) |move| {
+        result.win += move.win;
+        result.draw += move.draw;
+        result.loss += move.loss;
+    }
+
+    const length = @as(f32, @floatFromInt(moveBucket.items.len));
+    result.win /= length;
+    result.draw /= length;
+    result.loss /= length;
+
+    return result;
+
+}
+
+// find the best move for whoever is to move next
+fn getComputerMoveRecursively2(gameState: *GameState) usize {
+    // simply assume game is not over
+
+    var moveBucket = std.ArrayList(MoveAndInfo).init(allocator);
+    defer moveBucket.deinit();
+
+    const moves: std.ArrayList(usize) = getPossibleMoves(gameState); // for player to move next
+    defer moves.deinit();
+
+    for (moves.items) |move| {
+        const result = makeMove(gameState, move);
+        defer unmakeMove(gameState, move);
+
+        if (result) |r| {
+            if (r.winner) |_| {
+                const moveAndInfo = MoveAndInfo{.move = move, .moveInfo = .{.win=1, .draw=0, .loss=0}};
+                moveBucket.append(moveAndInfo) catch |err| std.debug.panic("error: {}\n", .{err});
+            } else {
+                // draw -- the only move left on the board
+                assert(moves.items.len == 1);
+
+                const moveAndInfo = MoveAndInfo{.move = move, .moveInfo = .{.win=0, .draw=1, .loss=0}};
+                moveBucket.append(moveAndInfo) catch |err| std.debug.panic("error: {}\n", .{err});
+            }
+        } else {
+            const moveInfo = checkMoves2(gameState, true);
+            moveBucket.append(.{.move = move, .moveInfo = moveInfo}) catch |err| std.debug.panic("error: {}\n", .{err});
+        }
+    }
+
+    std.mem.sort(
+        MoveAndInfo,
+        moveBucket.items,
+        {},
+        struct {
+            fn lessThan(_: void, lhs: MoveAndInfo, rhs: MoveAndInfo) bool {return lhs.moveInfo.win > rhs.moveInfo.win;}
+        }.lessThan
+    );
+
+    for (moveBucket.items) |move| {
+        print("{}: w: {d}, d: {d}, l: {d}\n", .{move.move, move.moveInfo.win, move.moveInfo.draw, move.moveInfo.loss});
+    }
+    print("\n", .{});
+
+    return moveBucket.items[0].move;
+}
 
 // assume best play by both players
 fn checkMoves(gameState: *GameState, opponent: bool) MoveInfo {
