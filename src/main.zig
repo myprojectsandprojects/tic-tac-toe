@@ -5,6 +5,10 @@
 // - consider different board type (place stones at the grid-line intersections, larger board)
 // - can we get the # of type conversions down?
 // - maybe we should highlight all winning rows (if more than one)?
+// - highlight most recently placed stone?
+// - if playing against computer it's not obvious at first if it's my move or computer's move.
+
+// - finding computer move: we could calculate probabilities of outcomes only once, store them in a tree data structure (?) and then walk the tree as the game progresses. This data structure could even be stored on disk, so it wouldn't matter if it took 3 months to calculate the probabilities, because we would just walk the tree during the game (?) It could be a huge amount of data if the number of possibilities is large though (?)
 
 // - numCols & numRows should go into a different data structure? board?
 
